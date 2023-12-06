@@ -1,3 +1,5 @@
+### All DT Helper functions
+
 import numpy as np
 import pandas as pd
 
@@ -8,11 +10,7 @@ import random
 from pprint import pprint
 from collections import Counter
 
-
-##### Preprocessing
-
-
-### assign "trips" variable
+### Preprocess data - "trips" variable
 def assign_trip(hp, dest):
     
     trip_val = ''
@@ -41,12 +39,8 @@ def assign_trip(hp, dest):
             
     return trip_val
 
-### Full Preprocessing Flow
-def data_preprocess(main, sample_percentage):
-    ## sampling
-    main = pd.read_csv('train.csv')
-    data = main.sample(frac=sample_percentage)
-    
+### Preprocess data - whole flow
+def data_preprocess(data):
     ## rename label
     data['label'] = data.Transported
     
@@ -86,42 +80,21 @@ def data_preprocess(main, sample_percentage):
     
     return app_1_df, app_2_df
 
-
-##### Decision Tree
-
-
-### Calculate Entropy
-def calculate_entropy(data):
+### Train Test Split
+def train_test_split(df, test_size):
     
-    label_column = data[:, -1]
-    _, counts = np.unique(label_column, return_counts=True)
+    if isinstance(test_size, float):
+        test_size = round(test_size * len(df))
 
-    probabilities = counts / counts.sum()
-    entropy = sum(probabilities * -np.log2(probabilities))
-     
-    return entropy
+    indices = df.index.tolist()
+    test_indices = random.sample(population=indices, k=test_size)
 
-### Calculate overall entropy
-def calculate_overall_entropy(data_below, data_above):
+    test_df = df.loc[test_indices]
+    train_df = df.drop(test_indices)
     
-    n = len(data_below) + len(data_above)
-    p_data_below = len(data_below) / n
-    p_data_above = len(data_above) / n
+    return train_df, test_df
 
-    overall_entropy =  (p_data_below * calculate_entropy(data_below) 
-                      + p_data_above * calculate_entropy(data_above))
-    
-    return overall_entropy
-
-### Calculate Info gain 
-def calculate_info_gain(data_unsplit, data_below, data_above):
-    
-    unsplit_entropy = calculate_entropy(data_unsplit)
-    overall = calculate_overall_entropy(data_below, data_above)
-    
-    return unsplit_entropy - overall
-
-### Check purity
+### Data Purity
 def check_purity(data):
     
     label_column = data[:, -1]
@@ -132,24 +105,29 @@ def check_purity(data):
     else:
         return False
     
-### Determine type of feature 
-def determine_type_of_feature(df):
+### Classification
+def classify_data(data):
     
-    feature_types = []
-    n_unique_values_treshold = 15
-    for feature in df.columns:
-        if feature != "label":
-            unique_values = df[feature].unique()
-            example_value = unique_values[0]
+    label_column = data[:, -1]
+    unique_classes, counts_unique_classes = np.unique(label_column, return_counts=True)
 
-            if (isinstance(example_value, str)) or (len(unique_values) <= n_unique_values_treshold):
-                feature_types.append("categorical")
-            else:
-                feature_types.append("continuous")
+    index = counts_unique_classes.argmax()
+    classification = unique_classes[index]
     
-    return feature_types
+    return classification
 
-### Scramble features 
+### Draw bootstrap
+def draw_bootstrap(data):
+    bootstrap_indices = list(np.random.choice(range(len(data)), len(data), replace = True))
+    oob_indices = [i for i in range(len(data)) if i not in bootstrap_indices]
+    
+    data_bootstrap = data.iloc[bootstrap_indices]
+    
+    data_oob = data.iloc[oob_indices]
+    
+    return data_bootstrap, data_oob
+
+### Feature sampling 
 def feature_scramble(data, max_features):
     
     feature_ls = list()
@@ -168,7 +146,7 @@ def feature_scramble(data, max_features):
     
     return unique
 
-### Get potential splits
+### Potential Splits
 def get_potential_splits(data, max_features):
     
     
@@ -183,8 +161,56 @@ def get_potential_splits(data, max_features):
     
     return potential_splits
 
-### Find best split 
-def determine_best_split(data, potential_splits): 
+### Split Data
+def split_data(data, split_column, split_value):
+    
+    split_column_values = data[:, split_column]
+
+    type_of_feature = FEATURE_TYPES[split_column]
+    if type_of_feature == "continuous":
+        data_below = data[split_column_values <= split_value]
+        data_above = data[split_column_values >  split_value]
+    
+    # feature is categorical   
+    else:
+        data_below = data[split_column_values == split_value]
+        data_above = data[split_column_values != split_value]
+    
+    return data_below, data_above
+
+### Calculate Entropy
+def calculate_entropy(data):
+    
+    label_column = data[:, -1]
+    _, counts = np.unique(label_column, return_counts=True)
+
+    probabilities = counts / counts.sum()
+    entropy = sum(probabilities * -np.log2(probabilities))
+     
+    return entropy
+
+### Lowest Overall Entropy
+def calculate_overall_entropy(data_below, data_above):
+    
+    n = len(data_below) + len(data_above)
+    p_data_below = len(data_below) / n
+    p_data_above = len(data_above) / n
+
+    overall_entropy =  (p_data_below * calculate_entropy(data_below) 
+                      + p_data_above * calculate_entropy(data_above))
+    
+    return overall_entropy
+
+### information gain
+def calculate_info_gain(data_unsplit, data_below, data_above):
+    
+    unsplit_entropy = calculate_entropy(data_unsplit)
+    overall = calculate_overall_entropy(data_below, data_above)
+    
+    return unsplit_entropy - overall
+
+### Determine Best Split
+def determine_best_split(data, potential_splits):
     
     best_split_column = None
     best_split_value = None
@@ -202,35 +228,24 @@ def determine_best_split(data, potential_splits):
     
     return best_split_column, best_split_value
 
-### Split data 
-def split_data(data, split_column, split_value):
+### Determine Feature Type
+def determine_type_of_feature(df):
     
-    split_column_values = data[:, split_column]
+    feature_types = []
+    n_unique_values_treshold = 15
+    for feature in df.columns:
+        if feature != "label":
+            unique_values = df[feature].unique()
+            example_value = unique_values[0]
 
-    type_of_feature = FEATURE_TYPES[split_column]
-    if type_of_feature == "continuous":
-        data_below = data[split_column_values <= split_value]
-        data_above = data[split_column_values >  split_value]
+            if (isinstance(example_value, str)) or (len(unique_values) <= n_unique_values_treshold):
+                feature_types.append("categorical")
+            else:
+                feature_types.append("continuous")
     
-    # feature is categorical   
-    else:
-        data_below = data[split_column_values == split_value]
-        data_above = data[split_column_values != split_value]
-    
-    return data_below, data_above
+    return feature_types
 
-### Classify data
-def classify_data(data):
-    
-    label_column = data[:, -1]
-    unique_classes, counts_unique_classes = np.unique(label_column, return_counts=True)
-
-    index = counts_unique_classes.argmax()
-    classification = unique_classes[index]
-    
-    return classification
-
-### full decission tree algorithm 
+### Decision Tree
 def decision_tree_algorithm(df, counter, min_samples, max_depth, max_features): 
     
     # data preparations
@@ -291,23 +306,8 @@ def decision_tree_algorithm(df, counter, min_samples, max_depth, max_features):
             sub_tree[question].append(no_answer)
         
         return sub_tree
-
     
-##### Random Forest 
-
-
-### draw bootstrap
-def draw_bootstrap(data):
-    bootstrap_indices = list(np.random.choice(range(len(data)), len(data), replace = True))
-    oob_indices = [i for i in range(len(data)) if i not in bootstrap_indices]
-    
-    data_bootstrap = data.iloc[bootstrap_indices]
-    
-    data_oob = data.iloc[oob_indices]
-    
-    return data_bootstrap, data_oob
-
-### classify an example 
+### Classify an Example
 def classify_example(example, tree):
     question = list(tree.keys())[0]
     # print(question)
@@ -335,8 +335,8 @@ def classify_example(example, tree):
     else:
         residual_tree = answer
         return classify_example(example, residual_tree)
-
-### calculate accuracy
+    
+### Calculate Model Accuracy
 def calculate_accuracy(df, tree):
     
     df["classification"] = df.apply(classify_example, axis=1, args=(tree,))
@@ -346,7 +346,14 @@ def calculate_accuracy(df, tree):
     
     return accuracy
 
-### random forest algo
+### Execute Model
+def run_model(df, test_size=0.2, max_depth=5):
+    train_df, test_df = train_test_split(df, test_size=test_size)
+    tree = decision_tree_algorithm(train_df, max_depth=max_depth)
+    accuracy = calculate_accuracy(test_df, tree)
+    return accuracy
+    
+### Random Forest 
 def random_forest(data, n_estimators, max_features=5, max_depth=5, min_samples=2):
     
     tree_ls = list()
@@ -363,7 +370,7 @@ def random_forest(data, n_estimators, max_features=5, max_depth=5, min_samples=2
     
     return tree_ls
 
-### predict an instance
+### Predict a single instance 
 def predict(val, trees):
     
     votes = []
@@ -375,12 +382,8 @@ def predict(val, trees):
     
     return counter.most_common(1)[0][0]
 
-
-##### Model evaluation 
-
-
-### get predictions
-def prediction(data, trees): 
+### Create prediction series 
+def prediction(data, trees):
     
     predictions = []
     
@@ -390,20 +393,20 @@ def prediction(data, trees):
     
     return predictions
 
-### evaluate predictions
+### Evaluate accuracy of random forest 
 def evaluate(data, predictions, label='label'):
     data['prediction'] = predictions 
     data['correct'] = data['prediction'] == data[label]
     return data['correct'].mean()
 
-### model testing 
+### Evaluate RF model with data 
 def model_testing(data, trees):
     predictions = prediction(data, trees)
     acc = evaluate(data, predictions)
     
     return acc
 
-### create indices for cross validation
+### Create indices for cross validation 
 def kfold_indices(data, k):
     fold_size = len(data) // k
     indices = np.arange(len(data))
@@ -414,7 +417,7 @@ def kfold_indices(data, k):
         folds.append((train_indices, test_indices))
     return folds
 
-### Execute cross validation 
+### Get cross val scores
 def cross_val(data, k, estimators):
     
     scores = []
